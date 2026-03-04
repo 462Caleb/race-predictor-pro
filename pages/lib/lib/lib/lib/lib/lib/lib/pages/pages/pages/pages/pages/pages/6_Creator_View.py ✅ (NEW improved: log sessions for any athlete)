@@ -1,0 +1,103 @@
+import streamlit as st
+import pandas as pd
+from datetime import date
+
+from lib.auth import ensure_profile, get_my_role, logout_ui
+from lib.db import (
+    list_profiles, recent_sessions, weeks,
+    insert_session, insert_intervals, upsert_metrics
+)
+from lib.notes_rules import analyze_notes
+from lib.metrics import compute_metrics
+
+st.title("Creator View (Admin / Coach)")
+
+user = st.session_state.get("sb_user")
+if not user:
+    st.warning("Please log in.")
+    st.stop()
+
+ensure_profile()
+logout_ui()
+
+role = get_my_role()
+if role != "creator":
+    st.error("Creator access only.")
+    st.stop()
+
+profiles = list_profiles()
+dfp = pd.DataFrame(profiles).sort_values("email")
+
+email = st.selectbox("Select athlete", dfp["email"].tolist())
+ath = dfp[dfp["email"] == email].iloc[0]
+ath_id = ath["user_id"]
+
+st.subheader("Athlete profile")
+st.write(dict(ath))
+
+st.divider()
+
+st.subheader("Log a session for this athlete")
+
+c1, c2, c3 = st.columns(3)
+with c1:
+    session_date = st.date_input("Date", value=date.today(), key="coach_date")
+with c2:
+    session_type = st.selectbox("Session type", ["Easy", "Long", "Tempo", "Track", "Race", "Other"], key="coach_type")
+with c3:
+    effort = st.slider("Effort (1–10)", 1, 10, 6, key="coach_effort")
+
+notes = st.text_area(
+    "Notes (optional)",
+    key="coach_notes",
+    placeholder="Example: calves sore, heavy legs, felt great, etc."
+)
+analysis = analyze_notes(notes)
+
+if analysis["guidance"]:
+    st.warning("Notes-based guidance (rule-based):")
+    for g in analysis["guidance"]:
+        st.write("• " + g)
+
+st.markdown("**Intervals (optional)**")
+default = pd.DataFrame([{
+    "sets": 1, "reps_per_set": 6, "rep_distance_m": 800, "rep_time_sec": 150, "rest_rep_sec": 90, "rest_set_sec": 0
+}])
+
+intervals = st.data_editor(
+    default,
+    num_rows="dynamic",
+    use_container_width=True,
+    key="coach_intervals"
+)
+
+if st.button("Save session for athlete", type="primary"):
+    sid = insert_session(
+        user_id=str(ath_id),
+        session_date=str(session_date),
+        session_type=session_type,
+        effort=int(effort),
+        notes=notes
+    )
+
+    intervals_clean = pd.DataFrame()
+    if intervals is not None and not intervals.empty:
+        intervals_clean = intervals.dropna()
+
+    if not intervals_clean.empty:
+        insert_intervals(sid, intervals_clean)
+        metrics = compute_metrics(intervals_clean, effort=int(effort), notes_analysis=analysis)
+    else:
+        metrics = compute_metrics(pd.DataFrame(), effort=int(effort), notes_analysis=analysis)
+
+    upsert_metrics(sid, metrics)
+    st.success("Saved for athlete!")
+    st.rerun()
+
+st.divider()
+
+st.subheader("Recent sessions (athlete)")
+st.dataframe(pd.DataFrame(recent_sessions(ath_id, limit=60)), use_container_width=True)
+
+st.subheader("Weeks (athlete)")
+st.dataframe(pd.DataFrame(weeks(ath_id, limit=24)), use_container_width=True)
