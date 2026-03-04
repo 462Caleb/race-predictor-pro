@@ -1,0 +1,25 @@
+RACES = {
+    "800 m": 800,
+    "1500 m": 1500,
+    "Mile (1609 m)": 1609,
+    "3000 m": 3000,
+    "3200 m": 3200,
+    "5000 m": 5000,
+    "6000 m (XC college)": 6000,
+    "8000 m (XC college)": 8000,
+    "10000 m": 10000,
+}
+
+def riegel(t1: float, d1: float, d2: float, exp: float = 1.06) -> float:
+    return t1 * (d2 / d1) ** exp
+
+def apply_readiness(t: float, readiness_modifier: float) -> float:
+    # readiness_modifier negative => time increases slightly (slower)
+    return t * (1 - readiness_modifier)
+
+def predict_all(anchor_dist_m: float, anchor_time_sec: float, exp: float, readiness_modifier: float) -> dict:
+    out = {}
+    for name, d in RACES.items():
+        t = riegel(anchor_time_sec, anchor_dist_m, float(d), exp=exp)
+        out[name] = apply_readiness(t, readiness_modifier)
+    return out
